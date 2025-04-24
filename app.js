@@ -14,10 +14,6 @@ async function initScene() {
     let camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 5, BABYLON.Vector3.Zero(), scene);
     camera.attachControl(canvas, true);
     
-    // Настройка света
-    new BABYLON.HemisphereLight("light1", new BABYLON.Color3(1, 1, 1), new BABYLON.Color3(0, 0, 0), scene);
-    new BABYLON.DirectionalLight("light2", new BABYLON.Vector3(0, -1, 1), scene);
-    
     // Создание AR-опыта
     const xr = await scene.createDefaultXRExperienceAsync({
         uiOptions: {
