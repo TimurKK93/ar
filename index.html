@@ -1,31 +1,248 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AR Галерея постеров</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <!-- Контейнер AR -->
-    <canvas id="renderCanvas"></canvas>
-    
-    <!-- Интерфейс -->
-    <div id="loadingScreen">
-        <div class="loader"></div>
-        <p>Загрузка AR...</p>
-    </div>
-    
-    <div id="arUI">
-        <div id="instruction">
-            Наведите камеру на стену и коснитесь экрана, чтобы разместить постер
-        </div>
-        <button id="changePosterBtn">Сменить постер</button>
-    </div>
-    
-    <!-- Подключаем Babylon.js -->
+    <title>AR Poster Placement</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+        #ui {
+            position: fixed;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            z-index: 10;
+        }
+        #placeButton {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 8px;
+        }
+        #status {
+            position: fixed;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            font-size: 18px;
+            z-index: 10;
+        }
+    </style>
+    <!-- Загрузка Babylon.js -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-    <script src="app.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+</head>
+<body>
+    <canvas id="renderCanvas" touch-action="none"></canvas>
+    <div id="status">Инициализация AR...</div>
+    <div id="ui">
+        <button id="placeButton" style="display: none;">Разместить постер</button>
+    </div>
+
+    <script>
+        // Конфигурация 
+        const POSTER_SIZE = { width: 1.0, height: 1.5 }; // Размер постера в метрах
+        const POSTER_IMAGE = "img/img.png"; // Путь к изображению постера (обновите на ваш путь)
+
+        // Глобальные переменные
+        let canvas, engine, scene, camera;
+        let xrExperience, hitTestResult;
+        let posterMesh, ghostPoster;
+        let placeButton = document.getElementById("placeButton");
+        let statusText = document.getElementById("status");
+
+        // Инициализация движка и сцены
+        async function initScene() {
+            // Базовая настройка Babylon.js
+            canvas = document.getElementById("renderCanvas");
+            engine = new BABYLON.Engine(canvas, true);
+            scene = new BABYLON.Scene(engine);
+            scene.clearColor = new BABYLON.Color4(0, 0, 0, 0); // Прозрачный фон
+            
+            // Камера для отображения в режиме не-AR
+            camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 1.6, -3), scene);
+            camera.setTarget(BABYLON.Vector3.Zero());
+            camera.attachControl(canvas, true);
+            
+            // Добавляем основное освещение
+            const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+            light.intensity = 0.7;
+            
+            // Создаем призрачную версию постера для предварительного просмотра
+            createGhostPoster();
+            
+            // Пытаемся инициализировать AR
+            try {
+                statusText.textContent = "Инициализация AR...";
+                
+                // Создаем AR опыт
+                xrExperience = await scene.createDefaultXRExperienceAsync({
+                    uiOptions: {
+                        sessionMode: "immersive-ar",
+                        referenceSpaceType: "local-floor",
+                        onError: (error) => {
+                            statusText.textContent = "AR ошибка: " + error.message;
+                        }
+                    },
+                    optionalFeatures: ["hit-test", "anchors", "plane-detection"]
+                });
+                
+                // Слушаем события состояния AR
+                xrExperience.baseExperience.onStateChangedObservable.add((state) => {
+                    if (state === BABYLON.WebXRState.IN_XR) {
+                        statusText.textContent = "AR активирован. Наведите на поверхность.";
+                        placeButton.style.display = "block";
+                    } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
+                        statusText.textContent = "AR сессия завершена.";
+                        placeButton.style.display = "none";
+                    }
+                });
+                
+                // Настройка обнаружения плоскостей
+                const featureManager = xrExperience.baseExperience.featuresManager;
+                
+                const hitTest = featureManager.enableFeature(BABYLON.WebXRHitTest, "latest");
+                const planeDetector = featureManager.enableFeature(BABYLON.WebXRPlaneDetection, "latest");
+                
+                // Показываем "призрак" постера, когда наводим на поверхность
+                hitTest.onHitTestResultObservable.add((results) => {
+                    if (results.length > 0) {
+                        hitTestResult = results[0];
+                        // Показываем призрачный постер на месте хит-теста
+                        ghostPoster.setEnabled(true);
+                        
+                        // Применяем позицию и ориентацию из хит-теста
+                        const matrix = hitTestResult.transformationMatrix;
+                        const position = new BABYLON.Vector3(matrix.getTranslationToRef(new BABYLON.Vector3()));
+                        ghostPoster.position = position;
+                        
+                        // Ориентируем постер перпендикулярно поверхности
+                        if (hitTestResult.xrHitResult.plane) {
+                            const planeNormal = new BABYLON.Vector3(
+                                hitTestResult.xrHitResult.plane.polygon.normal.x,
+                                hitTestResult.xrHitResult.plane.polygon.normal.y,
+                                hitTestResult.xrHitResult.plane.polygon.normal.z
+                            );
+                            
+                            // Если это стена (горизонтальный нормальный вектор)
+                            if (Math.abs(planeNormal.y) < 0.5) {
+                                // Создаем кватернион для поворота постера
+                                const quat = BABYLON.Quaternion.FromUnitVectorsToRef(
+                                    new BABYLON.Vector3(0, 0, 1), // Стандартный вектор "вперед"
+                                    planeNormal, // Нормаль стены
+                                    new BABYLON.Quaternion()
+                                );
+                                ghostPoster.rotationQuaternion = quat;
+                            } else {
+                                // Это пол или потолок, постер должен смотреть вверх
+                                ghostPoster.rotation = new BABYLON.Vector3(-Math.PI/2, 0, 0);
+                            }
+                        }
+                    } else {
+                        // Если хит-тест не обнаружил поверхность, скрываем призрак
+                        ghostPoster.setEnabled(false);
+                        hitTestResult = null;
+                    }
+                });
+                
+                // Показываем обнаруженные плоскости
+                planeDetector.onPlaneAddedObservable.add((plane) => {
+                    console.log("Обнаружена плоскость:", plane.id);
+                    statusText.textContent = "Поверхность обнаружена. Нажмите кнопку для размещения.";
+                });
+                
+                // Кнопка размещения постера
+                placeButton.addEventListener("click", placePoster);
+                
+            } catch (error) {
+                console.error("Ошибка инициализации AR:", error);
+                statusText.textContent = "Ошибка AR: " + error.message;
+            }
+            
+            // Основной цикл рендеринга
+            engine.runRenderLoop(() => {
+                scene.render();
+            });
+            
+            // Обработка изменения размера окна
+            window.addEventListener("resize", () => {
+                engine.resize();
+            });
+        }
+        
+        // Создаем призрачный постер для предпросмотра
+        function createGhostPoster() {
+            // Материал с прозрачностью
+            const material = new BABYLON.StandardMaterial("ghostMaterial", scene);
+            material.diffuseTexture = new BABYLON.Texture(POSTER_IMAGE, scene);
+            material.alpha = 0.5; // Полупрозрачный
+            
+            // Создаем меш для призрака
+            ghostPoster = BABYLON.MeshBuilder.CreatePlane("ghostPoster", POSTER_SIZE, scene);
+            ghostPoster.material = material;
+            ghostPoster.setEnabled(false); // Сначала скрываем
+        }
+        
+        // Размещаем настоящий постер
+        function placePoster() {
+            if (!hitTestResult) {
+                statusText.textContent = "Сначала наведите на поверхность!";
+                return;
+            }
+            
+            // Создаем постер
+            const material = new BABYLON.StandardMaterial("posterMaterial", scene);
+            material.diffuseTexture = new BABYLON.Texture(POSTER_IMAGE, scene);
+            material.specularColor = new BABYLON.Color3(0, 0, 0); // Убираем блики
+            
+            // Создаем меш для постера
+            posterMesh = BABYLON.MeshBuilder.CreatePlane("poster", POSTER_SIZE, scene);
+            posterMesh.material = material;
+            
+            // Позиционируем и поворачиваем так же, как и призрак
+            posterMesh.position = new BABYLON.Vector3().copyFrom(ghostPoster.position);
+            
+            if (ghostPoster.rotationQuaternion) {
+                posterMesh.rotationQuaternion = new BABYLON.Quaternion().copyFrom(ghostPoster.rotationQuaternion);
+            } else {
+                posterMesh.rotation = new BABYLON.Vector3().copyFrom(ghostPoster.rotation);
+            }
+            
+            // Если доступны якори, прикрепляем постер к якорю
+            if (xrExperience.baseExperience.featuresManager.enabledFeatures.find(f => f.name === "anchors")) {
+                const anchorSystem = xrExperience.baseExperience.featuresManager.getEnabledFeature(BABYLON.WebXRAnchorSystem);
+                anchorSystem.addAnchorPointUsingHitTestResultAsync(hitTestResult).then((anchor) => {
+                    posterMesh.setParent(anchor.transformationContainer);
+                });
+            }
+            
+            statusText.textContent = "Постер размещен!";
+        }
+        
+        // Запускаем сцену при загрузке страницы
+        window.addEventListener('DOMContentLoaded', initScene);
+    </script>
 </body>
 </html>
