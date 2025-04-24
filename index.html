@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AR Галерея постеров</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Контейнер AR -->
+    <canvas id="renderCanvas"></canvas>
+    
+    <!-- Интерфейс -->
+    <div id="loadingScreen">
+        <div class="loader"></div>
+        <p>Загрузка AR...</p>
+    </div>
+    
+    <div id="arUI">
+        <div id="instruction">
+            Наведите камеру на стену и коснитесь экрана, чтобы разместить постер
+        </div>
+        <button id="changePosterBtn">Сменить постер</button>
+    </div>
+    
+    <!-- Подключаем Babylon.js -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
