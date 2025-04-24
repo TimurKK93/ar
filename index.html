@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AR Poster Placement - Latest</title>
+    <title>Простой AR Постер</title>
     <style>
         html, body {
             margin: 0;
@@ -16,96 +16,79 @@
             height: 100%;
             touch-action: none;
         }
-        #ui {
+        #placeButton {
             position: fixed;
             bottom: 20px;
-            width: 100%;
-            text-align: center;
-            z-index: 10;
-        }
-        #placeButton {
-            background-color: #4CAF50;
-            border: none;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4CAF50;
             color: white;
-            padding: 15px 32px;
-            text-align: center;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
+            padding: 15px 30px;
+            border: none;
             border-radius: 8px;
+            font-size: 18px;
+            display: none;
         }
         #status {
             position: fixed;
-            top: 20px;
+            top: 10px;
             left: 0;
             width: 100%;
             text-align: center;
             color: white;
-            background-color: rgba(0, 0, 0, 0.5);
+            background: rgba(0,0,0,0.5);
             padding: 10px;
-            font-size: 18px;
-            z-index: 10;
+            font-size: 16px;
         }
     </style>
-    <!-- Используем последние версии Babylon.js из CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/babylonjs@6.39.0/babylon.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@6.39.0/babylonjs.loaders.min.js"></script>
+    <!-- Используем стабильную версию Babylon.js -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-    <canvas id="renderCanvas" touch-action="none"></canvas>
-    <div id="status">Инициализация...</div>
-    <div id="ui">
-        <button id="placeButton" style="display: none;">Разместить постер</button>
-    </div>
+    <canvas id="renderCanvas"></canvas>
+    <div id="status">Загрузка...</div>
+    <button id="placeButton">Разместить</button>
 
     <script>
-        // Основные настройки
-        const POSTER_IMAGE = "img/img.png"; // Обновите на путь к вашему изображению
+        // Настройки постера - измените путь к вашему изображению
+        const POSTER_IMAGE = "img/img.png";
         
-        // Запуск приложения
-        async function startApp() {
-            // Инициализация Babylon.js
-            const canvas = document.getElementById("renderCanvas");
-            const engine = new BABYLON.Engine(canvas, true);
-            const scene = new BABYLON.Scene(engine);
+        // Глобальные переменные
+        let engine, scene, camera;
+        let xr;
+        let posterMesh;
+        
+        // UI элементы
+        const canvas = document.getElementById("renderCanvas");
+        const statusText = document.getElementById("status");
+        const placeButton = document.getElementById("placeButton");
+        
+        // Запускаем приложение
+        async function init() {
+            statusText.textContent = "Инициализация...";
             
-            // UI элементы
-            const statusText = document.getElementById("status");
-            const placeButton = document.getElementById("placeButton");
+            // Создаем движок и сцену
+            engine = new BABYLON.Engine(canvas, true);
+            scene = new BABYLON.Scene(engine);
             
-            // Переменные для AR
-            let xrExperience;
-            let previewPoster;
-            let hitPosition = null;
-            
-            // Создание базовой сцены
-            const camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 1.5, -5), scene);
+            // Добавляем камеру и свет
+            camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 1, -5), scene);
             const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-            light.intensity = 0.7;
-            
-            // Подготовка предварительного просмотра постера
-            previewPoster = BABYLON.MeshBuilder.CreatePlane("preview", {width: 1, height: 1.5}, scene);
-            const previewMat = new BABYLON.StandardMaterial("previewMat", scene);
-            previewMat.diffuseTexture = new BABYLON.Texture(POSTER_IMAGE, scene);
-            previewMat.alpha = 0.6;
-            previewPoster.material = previewMat;
-            previewPoster.setEnabled(false);
             
             try {
-                statusText.textContent = "Запуск AR...";
-                
-                // Инициализация WebXR
-                xrExperience = await scene.createDefaultXRExperienceAsync({
+                // Инициализируем AR
+                xr = await scene.createDefaultXRExperienceAsync({
                     uiOptions: {
                         sessionMode: "immersive-ar"
                     }
                 });
                 
-                // Обработка состояния XR сессии
-                xrExperience.baseExperience.onStateChangedObservable.add((state) => {
-                    console.log("XR состояние:", state);
+                // Отслеживаем состояние AR
+                xr.baseExperience.onStateChangedObservable.add((state) => {
+                    console.log("AR состояние изменилось:", state);
+                    
                     if (state === BABYLON.WebXRState.IN_XR) {
-                        statusText.textContent = "AR активирован. Наведите на поверхность.";
+                        statusText.textContent = "AR активирован. Нажмите кнопку для размещения постера.";
                         placeButton.style.display = "block";
                     } else {
                         statusText.textContent = "AR не активен.";
@@ -113,85 +96,76 @@
                     }
                 });
                 
-                // Обработка ошибок XR
-                xrExperience.baseExperience.onInitialXRPoseSetObservable.add((xrCamera) => {
-                    console.log("XR камера инициализирована");
-                });
-                
-                // Определение нажатия на экран
-                scene.onPointerDown = () => {
-                    if (xrExperience && xrExperience.baseExperience.state === BABYLON.WebXRState.IN_XR) {
-                        // Сохраняем текущую позицию и ориентацию AR камеры
-                        const xrCamera = xrExperience.baseExperience.camera;
-                        
-                        if (xrCamera) {
-                            // Используем простой луч от камеры вперед
-                            const ray = new BABYLON.Ray(xrCamera.position, xrCamera.getDirection(BABYLON.Axis.Z), 5);
-                            const hit = scene.pickWithRay(ray);
-                            
-                            if (hit && hit.pickedPoint) {
-                                // Обрабатываем попадание
-                                hitPosition = hit.pickedPoint;
-                                
-                                // Показываем превью постера
-                                previewPoster.position = hitPosition;
-                                
-                                // Ориентируем постер к камере
-                                const direction = xrCamera.position.subtract(hitPosition).normalize();
-                                direction.y = 0; // Делаем постер вертикальным
-                                
-                                if (direction.length() > 0.1) {
-                                    previewPoster.lookAt(xrCamera.position, 0, Math.PI, Math.PI);
-                                    previewPoster.rotation.y += Math.PI; // Разворачиваем лицом к камере
-                                }
-                                
-                                previewPoster.setEnabled(true);
-                                statusText.textContent = "Поверхность найдена! Нажмите кнопку для размещения.";
-                            }
+                // Скрываем кнопку AR входа по умолчанию
+                if (xr.enterExitUI) {
+                    xr.enterExitUI.activeButtonChangedObservable.add((button) => {
+                        if (button) {
+                            button.element.style.cssText += 'bottom: 70px !important';
                         }
-                    }
-                };
+                    });
+                }
                 
-                // Обработка нажатия на кнопку
-                placeButton.addEventListener("click", () => {
-                    if (hitPosition) {
-                        // Создаем финальный постер
-                        const posterMat = new BABYLON.StandardMaterial("posterMat", scene);
-                        posterMat.diffuseTexture = new BABYLON.Texture(POSTER_IMAGE, scene);
-                        
-                        const poster = BABYLON.MeshBuilder.CreatePlane("poster", {width: 1, height: 1.5}, scene);
-                        poster.material = posterMat;
-                        poster.position = new BABYLON.Vector3(hitPosition.x, hitPosition.y, hitPosition.z);
-                        poster.rotation = new BABYLON.Vector3(
-                            previewPoster.rotation.x,
-                            previewPoster.rotation.y,
-                            previewPoster.rotation.z
-                        );
-                        
-                        statusText.textContent = "Постер размещен!";
-                    } else {
-                        statusText.textContent = "Сначала наведите на поверхность и коснитесь экрана!";
-                    }
+                // Обработка нажатия на кнопку размещения
+                placeButton.addEventListener("click", placePoster);
+                
+                // Запускаем рендеринг
+                engine.runRenderLoop(() => {
+                    scene.render();
                 });
+                
+                // Обработка изменения размера
+                window.addEventListener("resize", () => {
+                    engine.resize();
+                });
+                
+                statusText.textContent = "Готово. Войдите в AR режим.";
                 
             } catch (error) {
-                console.error("Ошибка AR:", error);
-                statusText.textContent = "Ошибка AR: " + error.message;
+                console.error("Ошибка инициализации:", error);
+                statusText.textContent = "Ошибка: " + error.message;
             }
-            
-            // Запуск цикла рендеринга
-            engine.runRenderLoop(() => {
-                scene.render();
-            });
-            
-            // Обработка изменения размера окна
-            window.addEventListener("resize", () => {
-                engine.resize();
-            });
         }
         
-        // Запуск приложения при загрузке страницы
-        window.addEventListener("DOMContentLoaded", startApp);
+        // Функция размещения постера
+        function placePoster() {
+            if (!xr || xr.baseExperience.state !== BABYLON.WebXRState.IN_XR) {
+                statusText.textContent = "AR не активен!";
+                return;
+            }
+            
+            try {
+                // Получаем текущую позицию AR камеры
+                const xrCamera = xr.baseExperience.camera;
+                
+                // Создаем материал для постера
+                const posterMaterial = new BABYLON.StandardMaterial("posterMat", scene);
+                posterMaterial.diffuseTexture = new BABYLON.Texture(POSTER_IMAGE, scene);
+                posterMaterial.specularColor = new BABYLON.Color3(0, 0, 0); // Убираем блики
+                
+                // Создаем постер
+                posterMesh = BABYLON.MeshBuilder.CreatePlane("poster", {width: 1, height: 1.5}, scene);
+                posterMesh.material = posterMaterial;
+                
+                // Размещаем постер в 1 метре перед камерой
+                const forward = xrCamera.getDirection(BABYLON.Axis.Z);
+                const position = xrCamera.position.add(forward.scale(-1)); // 1 метр вперед
+                posterMesh.position = position;
+                
+                // Разворачиваем постер лицом к камере
+                posterMesh.lookAt(xrCamera.position);
+                posterMesh.rotate(BABYLON.Axis.Y, Math.PI, BABYLON.Space.LOCAL); // Разворот на 180°
+                
+                statusText.textContent = "Постер размещен!";
+                console.log("Постер размещен на:", position);
+                
+            } catch (error) {
+                console.error("Ошибка при размещении постера:", error);
+                statusText.textContent = "Ошибка размещения: " + error.message;
+            }
+        }
+        
+        // Запускаем приложение
+        window.addEventListener("DOMContentLoaded", init);
     </script>
 </body>
 </html>
